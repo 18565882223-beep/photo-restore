@@ -102,10 +102,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: "图片数据不完整，请重新上传" }, { status: 400 });
   }
 
-  // 尺寸处理：必须是 64 的倍数
-  const outW = Math.round((width || 1152) / 64) * 64;
-  const outH = Math.round((height || 1536) / 64) * 64;
-  const size = `${outW}x${outH}`;
+  // 固定尺寸：1920x2560 = 4,915,200 像素，满足豆包最低 3,686,400 要求
+  const size = "1920x2560";
   console.log("输出尺寸:", size);
 
   const apiKey = process.env.DOUBAO_API_KEY;
