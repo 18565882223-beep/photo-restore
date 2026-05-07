@@ -136,14 +136,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 处理图片格式：去掉 data:image/...;base64, 前缀
-    const base64Image = imageString.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "");
-    console.log("传给豆包的 base64 长度:", base64Image.length);
-    console.log("传给豆包的 base64 开头:", base64Image.substring(0, 50));
-
     // 计算输出尺寸（64 的倍数）
     const size = calculateSize(width, height);
     console.log("最终输出尺寸:", size.width, "x", size.height);
+    console.log("传给豆包的 image 长度:", imageString.length);
+    console.log("传给豆包的 image 开头:", imageString.substring(0, 50));
 
     // 调用豆包 API
     const apiKey = process.env.DOUBAO_API_KEY;
@@ -167,7 +164,7 @@ export async function POST(request: NextRequest) {
         body: JSON.stringify({
           model: model,
           prompt: RESTORE_PROMPT,
-          image: base64Image,
+          image: imageString,
           image_size: `${size.width}x${size.height}`,
           watermark: false,
         }),
