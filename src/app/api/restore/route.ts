@@ -82,11 +82,36 @@ function calculateSize(origW: number, origH: number): { width: number; height: n
 // 照片修复接口
 export async function POST(request: NextRequest) {
   try {
-    const formData = await request.formData();
-    const code = formData.get("code") as string;
-    const imageData = formData.get("image") as string;
-    const imageWidth = parseInt(formData.get("width") as string) || 1024;
-    const imageHeight = parseInt(formData.get("height") as string) || 1024;
+    const contentType = request.headers.get("content-type") || "";
+
+    let code: string;
+    let imageData: string;
+    let imageWidth: number;
+    let imageHeight: number;
+
+    if (contentType.includes("application/json")) {
+      // JSON 格式
+      const body = await request.json();
+      code = body.code;
+      imageData = body.image;
+      imageWidth = body.width || 1024;
+      imageHeight = body.height || 1024;
+    } else {
+      // FormData 格式
+      const formData = await request.formData();
+      code = formData.get("code") as string;
+      imageData = formData.get("image") as string;
+      imageWidth = parseInt(formData.get("width") as string) || 1024;
+      imageHeight = parseInt(formData.get("height") as string) || 1024;
+    }
+
+    // 调试日志
+    console.log("=== 收到请求 ===");
+    console.log("image 存在:", !!imageData);
+    console.log("image 开头 50 字符:", imageData ? imageData.substring(0, 50) : "无");
+    console.log("image 长度:", imageData ? imageData.length : 0);
+    console.log("width:", imageWidth, "height:", imageHeight);
+    console.log("=================");
 
     // 验证卡密（从环境变量）
     const validCodes = process.env.VALID_CODES || "";
@@ -105,6 +130,14 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    // 处理图片格式：去掉 data:image/...;base64, 前缀，只保留纯 base64
+    let pureBase64 = imageData;
+    if (imageData.includes(",")) {
+      pureBase64 = imageData.split(",")[1] || imageData;
+    }
+    console.log("传给豆包的 base64 长度:", pureBase64.length);
+    console.log("传给豆包的 base64 开头:", pureBase64.substring(0, 30));
 
     // 计算输出尺寸
     const size = calculateSize(imageWidth, imageHeight);
@@ -131,7 +164,7 @@ export async function POST(request: NextRequest) {
         body: JSON.stringify({
           model: model,
           prompt: RESTORE_PROMPT,
-          image: imageData,
+          image: pureBase64,
           image_size: `${size.width}x${size.height}`,
           watermark: false,
         }),
