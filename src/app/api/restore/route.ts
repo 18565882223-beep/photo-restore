@@ -1,11 +1,58 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const DOUBAO_API_URL = "https://ark.cn-beijing.volces.com/api/v3/images/generations";
-
 const RESTORE_PROMPT = "修复这张老照片，提高清晰度和色彩";
 
+// 调用豆包 API，带自动重试（最多3次）
+async function callDoubao(body: Record<string, unknown>, apiKey: string, model: string): Promise<Record<string, unknown>> {
+  const maxRetries = 3;
+
+  for (let i = 1; i <= maxRetries; i++) {
+    console.log(`豆包 API 第 ${i} 次尝试...`);
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+      const apiResponse = await fetch(DOUBAO_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({ ...body, model }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+      const responseText = await apiResponse.text();
+      console.log(`豆包 API 第 ${i} 次状态: ${apiResponse.status}`);
+
+      if (apiResponse.ok) {
+        const result = JSON.parse(responseText);
+        console.log(`豆包 API 第 ${i} 次成功`);
+        return result;
+      }
+
+      console.log(`豆包 API 第 ${i} 次失败:`, responseText.slice(0, 200));
+      if (i < maxRetries) {
+        console.log(`等待 2 秒后重试...`);
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "未知错误";
+      console.log(`豆包 API 第 ${i} 次异常:`, msg);
+      if (i < maxRetries) {
+        console.log(`等待 2 秒后重试...`);
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
+  }
+
+  throw new Error("豆包 API 多次调用失败，请稍后重试");
+}
+
 export async function POST(request: NextRequest) {
-  // 1. 只接受 POST
   if (request.method !== "POST") {
     return NextResponse.json({ success: false, error: "只支持 POST 请求" }, { status: 405 });
   }
@@ -16,7 +63,6 @@ export async function POST(request: NextRequest) {
   let height: number | undefined;
 
   try {
-    // 2. 解析 JSON body
     const body = await request.json();
     code = body.code;
     image = body.image;
@@ -33,7 +79,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: "请求 body 解析失败，请使用 JSON 格式" }, { status: 400 });
   }
 
-  // 3. 验证卡密
+  // 验证卡密
   if (!code) {
     return NextResponse.json({ success: false, error: "卡密不能为空" }, { status: 400 });
   }
@@ -42,7 +88,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: "卡密无效" }, { status: 401 });
   }
 
-  // 4. 验证 image
+  // 验证 image
   if (!image) {
     return NextResponse.json({ success: false, error: "请上传照片" }, { status: 400 });
   }
@@ -56,13 +102,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: "图片数据不完整，请重新上传" }, { status: 400 });
   }
 
-  // 尺寸处理：默认 1152x1536，且必须是 64 的倍数
+  // 尺寸处理：必须是 64 的倍数
   const outW = Math.round((width || 1152) / 64) * 64;
   const outH = Math.round((height || 1536) / 64) * 64;
   const size = `${outW}x${outH}`;
   console.log("输出尺寸:", size);
 
-  // 5. 调用豆包 API（55秒超时）
   const apiKey = process.env.DOUBAO_API_KEY;
   const model = process.env.DOUBAO_MODEL || "doubao-seedream-4-5-251128";
 
@@ -70,45 +115,26 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: "API 配置错误，请联系卖家" }, { status: 500 });
   }
 
+  // 调用豆包 API（带重试）
   let doubaoResult: Record<string, unknown>;
   try {
-    console.log("开始调用豆包 API...");
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 55000);
-
-    const apiResponse = await fetch(DOUBAO_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: model,
+    doubaoResult = await callDoubao(
+      {
         image: image,
         prompt: RESTORE_PROMPT,
         response_format: "url",
         size: size,
-      }),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeoutId);
-    const responseText = await apiResponse.text();
-    console.log("豆包 API 状态:", apiResponse.status);
-    console.log("豆包 API 响应:", responseText.slice(0, 500));
-
-    if (!apiResponse.ok) {
-      return NextResponse.json({ success: false, error: `AI 修复失败：${responseText.slice(0, 200)}` }, { status: 500 });
-    }
-
-    doubaoResult = JSON.parse(responseText);
+      },
+      apiKey,
+      model
+    );
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "调用豆包 API 超时或网络错误";
-    console.error("豆包 API 调用失败:", msg);
+    const msg = err instanceof Error ? err.message : "调用豆包 API 失败";
+    console.error("豆包 API 最终失败:", msg);
     return NextResponse.json({ success: false, error: msg }, { status: 500 });
   }
 
-  // 6. 解析豆包响应
+  // 解析豆包响应
   if (doubaoResult.error) {
     const errMsg = typeof doubaoResult.error === "string" ? doubaoResult.error : JSON.stringify(doubaoResult.error);
     console.error("豆包返回错误:", errMsg);
@@ -120,7 +146,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: "AI 返回结果为空" }, { status: 500 });
   }
 
-  // 7 & 8. 返回结果
   console.log("修复成功，图片 URL:", imageUrl.slice(0, 80));
   return NextResponse.json({ success: true, imageUrl: imageUrl });
 }
