@@ -8,6 +8,62 @@ import ResultDisplay from "@/components/ResultDisplay";
 
 type Step = "verify" | "upload" | "result" | "loading";
 
+const MAX_EDGE = 1536; // 前端压缩：最长边 1536
+
+// 压缩图片：最长边限制为 1536，输出 JPEG，quality 0.85
+async function compressImage(file: File): Promise<{ dataUrl: string; width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+      img.src = e.target?.result as string;
+    };
+
+    img.onload = () => {
+      let { naturalWidth: origW, naturalHeight: origH } = img;
+      console.log("=== 前端压缩 ===");
+      console.log("压缩前尺寸:", origW, "x", origH);
+
+      // 计算压缩后尺寸（最长边 1536，保持比例）
+      let outW = origW;
+      let outH = origH;
+
+      if (origW >= origH && origW > MAX_EDGE) {
+        outW = MAX_EDGE;
+        outH = Math.round((MAX_EDGE / origW) * origH);
+      } else if (origH > origW && origH > MAX_EDGE) {
+        outH = MAX_EDGE;
+        outW = Math.round((MAX_EDGE / origH) * origW);
+      }
+
+      // 确保是偶数
+      outW = Math.round(outW / 2) * 2;
+      outH = Math.round(outH / 2) * 2;
+
+      console.log("压缩后尺寸:", outW, "x", outH);
+
+      // 用 canvas 绘制并导出
+      const canvas = document.createElement("canvas");
+      canvas.width = outW;
+      canvas.height = outH;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, 0, 0, outW, outH);
+
+      // 导出为 JPEG，quality 0.85，去掉 EXIF
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+      console.log("压缩后 base64 长度:", dataUrl.length);
+      console.log("===================");
+
+      resolve({ dataUrl, width: outW, height: outH });
+    };
+
+    img.onerror = reject;
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function RestorePage() {
   const [step, setStep] = useState<Step>("verify");
   const [code, setCode] = useState("");
@@ -27,18 +83,19 @@ export default function RestorePage() {
   const handleImageSelected = (file: File) => {
     setImageFile(file);
 
-    // 读取文件为 dataURL
+    // 生成预览（用原始文件）
     const reader = new FileReader();
     reader.onload = (e) => {
       const dataUrl = e.target?.result as string;
-      setImageDataUrl(dataUrl);
       setOriginalPreview(dataUrl);
 
-      // 获取图片原始尺寸
+      // 获取原始图片尺寸（用于前端压缩）
       const img = new Image();
       img.onload = () => {
         setImageWidth(img.naturalWidth);
         setImageHeight(img.naturalHeight);
+        // 预览用原始 dataURL，提交时用压缩后的
+        setImageDataUrl(dataUrl);
       };
       img.src = dataUrl;
     };
@@ -46,7 +103,7 @@ export default function RestorePage() {
   };
 
   const handleRestore = async () => {
-    if (!imageFile || !code || !imageDataUrl) {
+    if (!imageFile || !code) {
       setError("请上传照片");
       return;
     }
@@ -55,12 +112,15 @@ export default function RestorePage() {
     setError("");
 
     try {
+      // 前端压缩图片
+      const { dataUrl: compressedDataUrl, width: compressedWidth, height: compressedHeight } = await compressImage(imageFile);
+
       // 调试日志
       console.log("=== 前端提交 ===");
-      console.log("typeof imageDataUrl:", typeof imageDataUrl);
-      console.log("imageDataUrl.slice(0, 50):", imageDataUrl.slice(0, 50));
-      console.log("imageDataUrl.length:", imageDataUrl.length);
-      console.log("width:", imageWidth, "height:", imageHeight);
+      console.log("typeof compressedDataUrl:", typeof compressedDataUrl);
+      console.log("compressedDataUrl.slice(0, 50):", compressedDataUrl.slice(0, 50));
+      console.log("compressedDataUrl.length:", compressedDataUrl.length);
+      console.log("width:", compressedWidth, "height:", compressedHeight);
       console.log("=================");
 
       const res = await fetch("/api/restore", {
@@ -70,9 +130,9 @@ export default function RestorePage() {
         },
         body: JSON.stringify({
           code: code,
-          image: imageDataUrl,
-          width: imageWidth,
-          height: imageHeight,
+          image: compressedDataUrl,
+          width: compressedWidth,
+          height: compressedHeight,
         }),
       });
 
