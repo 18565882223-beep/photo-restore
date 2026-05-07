@@ -8,13 +8,13 @@ import ResultDisplay from "@/components/ResultDisplay";
 
 type Step = "verify" | "upload" | "result" | "loading";
 
-const MAX_EDGE = 1536; // 前端压缩：最长边 1536
+const MAX_EDGE = 1536;
 
-// 压缩图片：最长边限制为 1536，输出 JPEG，quality 0.85
+// 前端压缩：最长边限制为 1536，输出 JPEG，quality 0.85
 async function compressImage(file: File): Promise<{ dataUrl: string; width: number; height: number }> {
   return new Promise((resolve, reject) => {
-    const img = new Image();
     const reader = new FileReader();
+    const img = new Image();
 
     reader.onload = (e) => {
       img.src = e.target?.result as string;
@@ -23,9 +23,8 @@ async function compressImage(file: File): Promise<{ dataUrl: string; width: numb
     img.onload = () => {
       let { naturalWidth: origW, naturalHeight: origH } = img;
       console.log("=== 前端压缩 ===");
-      console.log("压缩前尺寸:", origW, "x", origH);
+      console.log("压缩前:", origW, "x", origH);
 
-      // 计算压缩后尺寸（最长边 1536，保持比例）
       let outW = origW;
       let outH = origH;
 
@@ -37,22 +36,19 @@ async function compressImage(file: File): Promise<{ dataUrl: string; width: numb
         outW = Math.round((MAX_EDGE / origH) * origW);
       }
 
-      // 确保是偶数
       outW = Math.round(outW / 2) * 2;
       outH = Math.round(outH / 2) * 2;
 
-      console.log("压缩后尺寸:", outW, "x", outH);
+      console.log("压缩后:", outW, "x", outH);
 
-      // 用 canvas 绘制并导出
       const canvas = document.createElement("canvas");
       canvas.width = outW;
       canvas.height = outH;
       const ctx = canvas.getContext("2d")!;
       ctx.drawImage(img, 0, 0, outW, outH);
 
-      // 导出为 JPEG，quality 0.85，去掉 EXIF
       const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
-      console.log("压缩后 base64 长度:", dataUrl.length);
+      console.log("base64 长度:", dataUrl.length);
       console.log("===================");
 
       resolve({ dataUrl, width: outW, height: outH });
@@ -68,9 +64,6 @@ export default function RestorePage() {
   const [step, setStep] = useState<Step>("verify");
   const [code, setCode] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imageDataUrl, setImageDataUrl] = useState<string | null>(null);
-  const [imageWidth, setImageWidth] = useState<number>(0);
-  const [imageHeight, setImageHeight] = useState<number>(0);
   const [originalPreview, setOriginalPreview] = useState<string | null>(null);
   const [restoredImage, setRestoredImage] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -82,22 +75,9 @@ export default function RestorePage() {
 
   const handleImageSelected = (file: File) => {
     setImageFile(file);
-
-    // 生成预览（用原始文件）
     const reader = new FileReader();
     reader.onload = (e) => {
-      const dataUrl = e.target?.result as string;
-      setOriginalPreview(dataUrl);
-
-      // 获取原始图片尺寸（用于前端压缩）
-      const img = new Image();
-      img.onload = () => {
-        setImageWidth(img.naturalWidth);
-        setImageHeight(img.naturalHeight);
-        // 预览用原始 dataURL，提交时用压缩后的
-        setImageDataUrl(dataUrl);
-      };
-      img.src = dataUrl;
+      setOriginalPreview(e.target?.result as string);
     };
     reader.readAsDataURL(file);
   };
@@ -112,67 +92,54 @@ export default function RestorePage() {
     setError("");
 
     try {
-      // 前端压缩图片
-      const { dataUrl: compressedDataUrl, width: compressedWidth, height: compressedHeight } = await compressImage(imageFile);
+      // 1. 前端压缩图片
+      const { dataUrl, width, height } = await compressImage(imageFile);
 
-      // 调试日志
       console.log("=== 前端提交 ===");
-      console.log("typeof compressedDataUrl:", typeof compressedDataUrl);
-      console.log("compressedDataUrl.slice(0, 50):", compressedDataUrl.slice(0, 50));
-      console.log("compressedDataUrl.length:", compressedDataUrl.length);
-      console.log("width:", compressedWidth, "height:", compressedHeight);
+      console.log("dataUrl 开头:", dataUrl.slice(0, 50));
+      console.log("dataUrl 长度:", dataUrl.length);
+      console.log("width:", width, "height:", height);
       console.log("=================");
 
-      const res = await fetch("/api/restore", {
+      // 2 & 3. 调用 /api/restore（60秒超时）
+      const response = await fetch("/api/restore", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          code: code,
-          image: compressedDataUrl,
-          width: compressedWidth,
-          height: compressedHeight,
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, image: dataUrl, width, height }),
+        signal: AbortSignal.timeout(60000),
       });
 
-      const data = await res.json();
-
+      // 4. 处理响应
+      const rawText = await response.text();
       console.log("=== 后端响应 ===");
-      console.log("status:", res.status);
-      console.log("raw response:", JSON.stringify(data).slice(0, 300));
+      console.log("status:", response.status);
+      console.log("raw:", rawText.slice(0, 300));
       console.log("=================");
 
-      // 支持两种响应格式：
-      // 1. 后端统一封装格式：{ success: true, imageUrl: "..." }
-      // 2. 后端直接透传豆包格式：{ model: "...", data: [{ url: "..." }] }
-      let imageUrl: string | null = null;
-
-      if (data.success && data.imageUrl) {
-        // 封装格式
-        imageUrl = data.imageUrl;
-      } else if (data.data && data.data[0] && data.data[0].url) {
-        // 豆包原始格式
-        imageUrl = data.data[0].url;
-      } else if (data.error) {
-        // 豆包返回错误
-        const errorMsg = typeof data.error === "string" ? data.error : JSON.stringify(data.error);
-        setError(`AI 错误：${errorMsg}`);
+      let result: { success?: boolean; imageUrl?: string; error?: string };
+      try {
+        result = JSON.parse(rawText);
+      } catch {
+        setError(`服务器返回异常：${rawText.slice(0, 200)}`);
         setStep("upload");
         return;
       }
 
-      if (imageUrl) {
-        setRestoredImage(imageUrl);
+      if (result.success && result.imageUrl) {
+        setRestoredImage(result.imageUrl);
         setStep("result");
       } else {
-        setError(data.message || "修复失败：响应格式异常");
+        setError(result.error || "修复失败");
         setStep("upload");
       }
     } catch (err) {
       console.error("请求错误:", err);
-      const message = err instanceof Error ? err.message : "网络错误，请检查网络后重试";
-      setError(message);
+      const msg = err instanceof Error ? err.message : "未知错误";
+      if (msg.includes("abort") || msg.includes("timeout") || msg.includes("Timeout")) {
+        setError("请求超时，图片修复可能需要较长时间，请重试");
+      } else {
+        setError(msg);
+      }
       setStep("upload");
     }
   };
@@ -181,9 +148,6 @@ export default function RestorePage() {
     setStep("verify");
     setCode("");
     setImageFile(null);
-    setImageDataUrl(null);
-    setImageWidth(0);
-    setImageHeight(0);
     setOriginalPreview(null);
     setRestoredImage(null);
     setError("");
@@ -220,12 +184,9 @@ export default function RestorePage() {
         {(step === "upload" || step === "loading" || step === "result") && (
           <div className="bg-[#18181b] rounded-xl p-6 border border-[#2a2a2e]">
             <h2 className="text-lg font-medium text-white mb-4">步骤2：上传照片</h2>
-            <ImageUpload
-              onImageSelected={handleImageSelected}
-              disabled={step === "loading"}
-            />
+            <ImageUpload onImageSelected={handleImageSelected} disabled={step === "loading"} />
 
-            {imageFile && imageDataUrl && (
+            {imageFile && (
               <button
                 onClick={handleRestore}
                 disabled={step === "loading"}
@@ -250,11 +211,7 @@ export default function RestorePage() {
         {step === "result" && originalPreview && restoredImage && (
           <div className="bg-[#18181b] rounded-xl p-6 border border-[#2a2a2e]">
             <h2 className="text-lg font-medium text-white mb-4">步骤3：修复完成</h2>
-            <ResultDisplay
-              originalImage={originalPreview}
-              restoredImage={restoredImage}
-              onReset={handleReset}
-            />
+            <ResultDisplay originalImage={originalPreview} restoredImage={restoredImage} onReset={handleReset} />
           </div>
         )}
 
@@ -267,9 +224,7 @@ export default function RestorePage() {
 
         {/* 返回首页 */}
         <div className="text-center">
-          <Link href="/" className="text-[#a1a1aa] hover:text-white text-sm">
-            返回首页
-          </Link>
+          <Link href="/" className="text-[#a1a1aa] hover:text-white text-sm">返回首页</Link>
         </div>
       </div>
     </main>
