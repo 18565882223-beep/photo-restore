@@ -139,20 +139,40 @@ export default function RestorePage() {
       const data = await res.json();
 
       console.log("=== 后端响应 ===");
-      console.log("success:", data.success);
-      console.log("message:", data.message);
+      console.log("status:", res.status);
+      console.log("raw response:", JSON.stringify(data).slice(0, 300));
       console.log("=================");
 
-      if (data.success) {
-        setRestoredImage(data.imageUrl);
+      // 支持两种响应格式：
+      // 1. 后端统一封装格式：{ success: true, imageUrl: "..." }
+      // 2. 后端直接透传豆包格式：{ model: "...", data: [{ url: "..." }] }
+      let imageUrl: string | null = null;
+
+      if (data.success && data.imageUrl) {
+        // 封装格式
+        imageUrl = data.imageUrl;
+      } else if (data.data && data.data[0] && data.data[0].url) {
+        // 豆包原始格式
+        imageUrl = data.data[0].url;
+      } else if (data.error) {
+        // 豆包返回错误
+        const errorMsg = typeof data.error === "string" ? data.error : JSON.stringify(data.error);
+        setError(`AI 错误：${errorMsg}`);
+        setStep("upload");
+        return;
+      }
+
+      if (imageUrl) {
+        setRestoredImage(imageUrl);
         setStep("result");
       } else {
-        setError(data.message || "修复失败");
+        setError(data.message || "修复失败：响应格式异常");
         setStep("upload");
       }
     } catch (err) {
       console.error("请求错误:", err);
-      setError("网络错误，请检查网络后重试");
+      const message = err instanceof Error ? err.message : "网络错误，请检查网络后重试";
+      setError(message);
       setStep("upload");
     }
   };
