@@ -1,7 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import sharp from "sharp";
-
-const KV_BASE = "https://kv.3ceng.cn/f/69fc89c8ee09cda912587deb";
 
 // 修复提示词（来自交接文档）
 const RESTORE_PROMPT = `你是一位专业的老照片修复师。请对这张老照片进行全面修复，严格遵守以下要求：
@@ -82,25 +79,14 @@ function calculateSize(origW: number, origH: number): { width: number; height: n
   return { width: outW, height: outH };
 }
 
-// 验证卡密（从快链 KV）
-async function verifyCode(code: string): Promise<boolean> {
-  try {
-    const res = await fetch(`${KV_BASE}/get?key=codes`, { method: "GET" });
-    const json = await res.json();
-    if (!json.ok || !json.data?.codes) return false;
-    const codes = json.data.codes.split(",").map((c: string) => c.trim()).filter(Boolean);
-    return codes.includes(code);
-  } catch {
-    return false;
-  }
-}
-
 // 照片修复接口
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const code = formData.get("code") as string;
-    const image = formData.get("image") as File;
+    const imageData = formData.get("image") as string;
+    const imageWidth = parseInt(formData.get("width") as string) || 1024;
+    const imageHeight = parseInt(formData.get("height") as string) || 1024;
 
     // 验证卡密（从环境变量）
     const validCodes = process.env.VALID_CODES || "";
@@ -113,39 +99,15 @@ export async function POST(request: NextRequest) {
     }
 
     // 验证图片
-    if (!image) {
+    if (!imageData) {
       return NextResponse.json(
         { success: false, message: "请上传照片" },
         { status: 400 }
       );
     }
 
-    const validTypes = ["image/jpeg", "image/png", "image/webp"];
-    if (!validTypes.includes(image.type)) {
-      return NextResponse.json(
-        { success: false, message: "只支持 jpg/png/webp 格式" },
-        { status: 400 }
-      );
-    }
-
-    if (image.size > 5 * 1024 * 1024) {
-      return NextResponse.json(
-        { success: false, message: "图片大小不能超过 5MB" },
-        { status: 400 }
-      );
-    }
-
-    // 读取图片尺寸并计算输出尺寸
-    const arrayBuffer = await image.arrayBuffer();
-    const imageBuffer = Buffer.from(arrayBuffer);
-    const metadata = await sharp(imageBuffer).metadata();
-    const origW = metadata.width || 1024;
-    const origH = metadata.height || 1024;
-    const size = calculateSize(origW, origH);
-
-    // 将图片转为 base64
-    const base64 = imageBuffer.toString("base64");
-    const imageData = `data:${image.type};base64,${base64}`;
+    // 计算输出尺寸
+    const size = calculateSize(imageWidth, imageHeight);
 
     // 调用豆包 API
     const apiKey = process.env.DOUBAO_API_KEY;
