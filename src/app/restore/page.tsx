@@ -12,6 +12,9 @@ export default function RestorePage() {
   const [step, setStep] = useState<Step>("verify");
   const [code, setCode] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imageDataUrl, setImageDataUrl] = useState<string | null>(null);
+  const [imageWidth, setImageWidth] = useState<number>(0);
+  const [imageHeight, setImageHeight] = useState<number>(0);
   const [originalPreview, setOriginalPreview] = useState<string | null>(null);
   const [restoredImage, setRestoredImage] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -23,30 +26,62 @@ export default function RestorePage() {
 
   const handleImageSelected = (file: File) => {
     setImageFile(file);
+
+    // 读取文件为 dataURL
     const reader = new FileReader();
     reader.onload = (e) => {
-      setOriginalPreview(e.target?.result as string);
+      const dataUrl = e.target?.result as string;
+      setImageDataUrl(dataUrl);
+      setOriginalPreview(dataUrl);
+
+      // 获取图片原始尺寸
+      const img = new Image();
+      img.onload = () => {
+        setImageWidth(img.naturalWidth);
+        setImageHeight(img.naturalHeight);
+      };
+      img.src = dataUrl;
     };
     reader.readAsDataURL(file);
   };
 
   const handleRestore = async () => {
-    if (!imageFile || !code) return;
+    if (!imageFile || !code || !imageDataUrl) {
+      setError("请上传照片");
+      return;
+    }
 
     setStep("loading");
     setError("");
 
     try {
-      const formData = new FormData();
-      formData.append("code", code);
-      formData.append("image", imageFile);
+      // 调试日志
+      console.log("=== 前端提交 ===");
+      console.log("typeof imageDataUrl:", typeof imageDataUrl);
+      console.log("imageDataUrl.slice(0, 50):", imageDataUrl.slice(0, 50));
+      console.log("imageDataUrl.length:", imageDataUrl.length);
+      console.log("width:", imageWidth, "height:", imageHeight);
+      console.log("=================");
 
       const res = await fetch("/api/restore", {
         method: "POST",
-        body: formData,
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          code: code,
+          image: imageDataUrl,
+          width: imageWidth,
+          height: imageHeight,
+        }),
       });
 
       const data = await res.json();
+
+      console.log("=== 后端响应 ===");
+      console.log("success:", data.success);
+      console.log("message:", data.message);
+      console.log("=================");
 
       if (data.success) {
         setRestoredImage(data.imageUrl);
@@ -55,7 +90,8 @@ export default function RestorePage() {
         setError(data.message || "修复失败");
         setStep("upload");
       }
-    } catch {
+    } catch (err) {
+      console.error("请求错误:", err);
       setError("网络错误，请检查网络后重试");
       setStep("upload");
     }
@@ -65,6 +101,9 @@ export default function RestorePage() {
     setStep("verify");
     setCode("");
     setImageFile(null);
+    setImageDataUrl(null);
+    setImageWidth(0);
+    setImageHeight(0);
     setOriginalPreview(null);
     setRestoredImage(null);
     setError("");
@@ -106,7 +145,7 @@ export default function RestorePage() {
               disabled={step === "loading"}
             />
 
-            {imageFile && (
+            {imageFile && imageDataUrl && (
               <button
                 onClick={handleRestore}
                 disabled={step === "loading"}

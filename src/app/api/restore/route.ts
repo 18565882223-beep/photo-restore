@@ -42,7 +42,6 @@ function calculateSize(origW: number, origH: number): { width: number; height: n
   let outW: number;
   let outH: number;
 
-  // 先按长边 2048 算
   if (origW >= origH) {
     outW = LONG_EDGE;
     outH = Math.round(outW / ratio);
@@ -51,7 +50,6 @@ function calculateSize(origW: number, origH: number): { width: number; height: n
     outW = Math.round(outH * ratio);
   }
 
-  // 如果总像素不够最低限制，就放大到满足要求
   if (outW * outH < MIN_PIXELS) {
     if (origW >= origH) {
       outH = Math.ceil(Math.sqrt(MIN_PIXELS / ratio));
@@ -62,7 +60,6 @@ function calculateSize(origW: number, origH: number): { width: number; height: n
     }
   }
 
-  // 确保不超过最大边长
   if (outW > MAX_LONG_EDGE) {
     outH = Math.round(MAX_LONG_EDGE / outW * outH);
     outW = MAX_LONG_EDGE;
@@ -72,7 +69,6 @@ function calculateSize(origW: number, origH: number): { width: number; height: n
     outH = MAX_LONG_EDGE;
   }
 
-  // 确保是偶数
   outW = Math.round(outW / 2) * 2;
   outH = Math.round(outH / 2) * 2;
 
@@ -82,46 +78,28 @@ function calculateSize(origW: number, origH: number): { width: number; height: n
 // 照片修复接口
 export async function POST(request: NextRequest) {
   try {
-    const contentType = request.headers.get("content-type") || "";
-
-    let code: string;
-    let imageData: string;
-    let imageWidth: number;
-    let imageHeight: number;
-
-    if (contentType.includes("application/json")) {
-      // JSON 格式
-      const body = await request.json();
-      code = body.code;
-      imageData = body.image;
-      imageWidth = body.width || 1024;
-      imageHeight = body.height || 1024;
-    } else {
-      // FormData 格式
-      const formData = await request.formData();
-      code = formData.get("code") as string;
-      imageData = formData.get("image") as string;
-      imageWidth = parseInt(formData.get("width") as string) || 1024;
-      imageHeight = parseInt(formData.get("height") as string) || 1024;
-    }
+    // 只接受 JSON 格式
+    const body = await request.json();
+    const code: string = body.code;
+    const imageRaw: unknown = body.image;
+    const width: number = body.width || 1024;
+    const height: number = body.height || 1024;
 
     // 调试日志
-    console.log("=== 收到请求 ===");
-    console.log("typeof image:", typeof imageData);
-    console.log("image is array:", Array.isArray(imageData));
-    console.log("image preview:", JSON.stringify(imageData).slice(0, 200));
-    console.log("width:", imageWidth, "height:", imageHeight);
-    console.log("=================");
+    console.log("=== 后端收到请求 ===");
+    console.log("typeof image:", typeof imageRaw);
+    console.log("image is array:", Array.isArray(imageRaw));
+    console.log("image preview:", JSON.stringify(imageRaw).slice(0, 200));
+    console.log("width:", width, "height:", height);
+    console.log("========================");
 
-    // 统一处理 image 格式，确保最终是字符串
+    // 统一处理 image 格式
     let imageString: string;
-    const rawImage = imageData as unknown;
 
-    if (typeof rawImage === "string") {
-      imageString = rawImage;
-    } else if (typeof rawImage === "object" && rawImage !== null) {
-      // 尝试从对象中提取字符串字段
-      const imgObj = rawImage as Record<string, unknown>;
+    if (typeof imageRaw === "string") {
+      imageString = imageRaw;
+    } else if (typeof imageRaw === "object" && imageRaw !== null) {
+      const imgObj = imageRaw as Record<string, unknown>;
       if (typeof imgObj.url === "string") {
         imageString = imgObj.url;
       } else if (typeof imgObj.data === "string") {
@@ -129,37 +107,60 @@ export async function POST(request: NextRequest) {
       } else if (typeof imgObj.base64 === "string") {
         imageString = imgObj.base64;
       } else {
-        imageString = JSON.stringify(rawImage);
+        imageString = JSON.stringify(imageRaw);
       }
     } else {
-      imageString = String(rawImage);
+      imageString = String(imageRaw);
     }
 
-    // 验证卡密（从环境变量）
+    // 严格校验
+    if (!code) {
+      return NextResponse.json(
+        { success: false, message: "卡密不能为空" },
+        { status: 400 }
+      );
+    }
+
+    if (typeof imageString !== "string") {
+      return NextResponse.json(
+        { success: false, message: "图片格式错误：image 必须是 base64 字符串" },
+        { status: 400 }
+      );
+    }
+
+    if (imageString.length < 1000) {
+      return NextResponse.json(
+        { success: false, message: "图片数据不完整，请重新上传" },
+        { status: 400 }
+      );
+    }
+
+    if (typeof width !== "number" || typeof height !== "number" || width <= 0 || height <= 0) {
+      return NextResponse.json(
+        { success: false, message: "图片尺寸无效" },
+        { status: 400 }
+      );
+    }
+
+    // 验证卡密
     const validCodes = process.env.VALID_CODES || "";
     const codes = validCodes.split(",").map((c) => c.trim()).filter(Boolean);
-    if (!code || !codes.includes(code)) {
+    if (!codes.includes(code)) {
       return NextResponse.json(
         { success: false, message: "卡密无效" },
         { status: 401 }
       );
     }
 
-    // 验证图片
-    if (!imageString) {
-      return NextResponse.json(
-        { success: false, message: "请上传照片" },
-        { status: 400 }
-      );
-    }
-
-    // 处理图片格式：去掉 data:image/...;base64, 前缀，只保留纯 base64
+    // 处理图片格式：保留 dataURL 格式（豆包可能需要完整 dataURL）
+    // 或者去掉前缀
     const base64Image = imageString.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "");
     console.log("传给豆包的 base64 长度:", base64Image.length);
-    console.log("传给豆包的 base64 开头:", base64Image.substring(0, 30));
+    console.log("传给豆包的 base64 开头:", base64Image.substring(0, 50));
 
     // 计算输出尺寸
-    const size = calculateSize(imageWidth, imageHeight);
+    const size = calculateSize(width, height);
+    console.log("输出尺寸:", size);
 
     // 调用豆包 API
     const apiKey = process.env.DOUBAO_API_KEY;
@@ -190,21 +191,23 @@ export async function POST(request: NextRequest) {
       }
     );
 
+    const errorText = await apiResponse.text();
+    console.log("豆包 API 响应状态:", apiResponse.status);
+    console.log("豆包 API 响应内容:", errorText.slice(0, 500));
+
     if (!apiResponse.ok) {
-      const errorText = await apiResponse.text();
-      console.error("豆包 API 错误:", errorText);
       return NextResponse.json(
-        { success: false, message: "AI 修复失败，请稍后重试" },
+        { success: false, message: `AI 修复失败：${errorText.slice(0, 100)}` },
         { status: 500 }
       );
     }
 
-    const result = await apiResponse.json();
+    const result = JSON.parse(errorText);
 
     if (result.error) {
       console.error("豆包 API 返回错误:", result.error);
       return NextResponse.json(
-        { success: false, message: "AI 修复失败，请稍后重试" },
+        { success: false, message: `AI 返回错误：${JSON.stringify(result.error)}` },
         { status: 500 }
       );
     }
