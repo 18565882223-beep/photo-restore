@@ -2,7 +2,6 @@ const DOUBAO_API_URL = "https://ark.cn-beijing.volces.com/api/v3/images/generati
 const RESTORE_PROMPT = "修复这张老照片，提高清晰度和色彩";
 const MIN_PIXELS = 3686400;
 
-// 调用豆包 API（带超时）
 async function callDoubao(body, apiKey, model) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 55000);
@@ -33,7 +32,6 @@ async function callDoubao(body, apiKey, model) {
   }
 }
 
-// 计算输出尺寸：按比例放大使总像素 >= 3686400
 function calculateSize(origW, origH) {
   let w = origW;
   let h = origH;
@@ -48,7 +46,6 @@ function calculateSize(origW, origH) {
     console.log(`放大比例: ${scale.toFixed(2)}，放大后: ${w}x${h} = ${w * h} 像素`);
   }
 
-  // 确保偶数
   if (w % 2 !== 0) w += 1;
   if (h % 2 !== 0) h += 1;
 
@@ -56,34 +53,22 @@ function calculateSize(origW, origH) {
   return `${w}x${h}`;
 }
 
-async function handler(event, context) {
-  const response = new Response();
-  response.headers.set("Access-Control-Allow-Origin", "*");
-  response.headers.set("Access-Control-Allow-Methods", "POST, OPTIONS");
-  response.headers.set("Access-Control-Allow-Headers", "Content-Type");
+export const onRequestOptions = async () => {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    },
+  });
+};
 
-  // 处理 CORS 预检
-  if (event.request.method === "OPTIONS") {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
-      },
-    });
-  }
-
-  if (event.request.method !== "POST") {
-    response.status = 405;
-    response.body = JSON.stringify({ success: false, error: "只支持 POST 请求" });
-    return response;
-  }
-
+export const onRequestPost = async (context) => {
   let code, image, width, height;
 
   try {
-    const body = await event.request.json();
+    const body = await context.request.json();
     code = body.code;
     image = body.image;
     width = body.width;
@@ -178,6 +163,4 @@ async function handler(event, context) {
     status: 200,
     headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
   });
-}
-
-module.exports = handler;
+};
