@@ -14,18 +14,20 @@ export default function ResultDisplay({ originalImage, restoredImage, onReset }:
   const handleDownload = async () => {
     setDownloading(true);
     try {
-      // 远程 URL 需要先下载
-      const res = await fetch(restoredImage);
-      const blob = await res.blob();
-
-      const url = URL.createObjectURL(blob);
+      // 方案 1：fetch 转 Blob 下载（兼容 iOS Safari）
+      const response = await fetch(restoredImage);
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url;
-      a.download = "修复后照片.png";
+      a.href = blobUrl;
+      a.download = "修复后照片.jpg";
+      a.target = "_blank"; // 防止 iOS Safari 替换当前页面
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
     } catch {
-      // 如果下载失败，尝试直接打开链接让用户手动保存
+      // 方案 2：降级为新标签页打开，用户长按保存
       window.open(restoredImage, "_blank");
     } finally {
       setDownloading(false);
