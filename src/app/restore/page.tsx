@@ -101,8 +101,8 @@ export default function RestorePage() {
       console.log("width:", width, "height:", height);
       console.log("=================");
 
-      // 2 & 3. 调用 Node Function /restore（60秒超时）
-      const response = await fetch("/restore", {
+      // 2 & 3. 调用 /api/restore（60秒超时）
+      const response = await fetch("/api/restore", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code, image: dataUrl, width, height }),
