@@ -101,8 +101,8 @@ export default function RestorePage() {
       console.log("width:", width, "height:", height);
       console.log("=================");
 
-      // 2 & 3. 调用 /api/restore（60秒超时）
-      const response = await fetch("/api/restore", {
+      // 2 & 3. 调用 SCF 修复接口（60秒超时）
+      const response = await fetch("https://1429552633-fm2kefpz6l.ap-guangzhou.tencentscf.com/restore", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code, image: dataUrl, width, height }),
