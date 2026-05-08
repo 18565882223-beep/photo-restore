@@ -14,20 +14,39 @@ export default function ResultDisplay({ originalImage, restoredImage, onReset }:
   const handleDownload = async () => {
     setDownloading(true);
     try {
-      // 方案 1：fetch 转 Blob 下载（兼容 iOS Safari）
       const response = await fetch(restoredImage);
       const blob = await response.blob();
+      const filename = "修复后照片.jpg";
+
+      // 检查是否支持 navigator.share（iOS Safari 可触发分享面板，有"存储到照片"选项）
+      if (navigator.share && navigator.canShare) {
+        const file = new File([blob], filename, { type: "image/jpeg" });
+        if (navigator.canShare({ files: [file] })) {
+          try {
+            await navigator.share({
+              files: [file],
+              title: "修复后照片",
+            });
+            setDownloading(false);
+            return;
+          } catch {
+            // 用户取消分享，不报错，继续走兜底逻辑
+          }
+        }
+      }
+
+      // 兜底：Blob 下载（iOS Safari 会保存到 Files app）
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = blobUrl;
-      a.download = "修复后照片.jpg";
-      a.target = "_blank"; // 防止 iOS Safari 替换当前页面
+      a.download = filename;
+      a.target = "_blank";
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(blobUrl);
     } catch {
-      // 方案 2：降级为新标签页打开，用户长按保存
+      // 最终降级：新标签页打开
       window.open(restoredImage, "_blank");
     } finally {
       setDownloading(false);
