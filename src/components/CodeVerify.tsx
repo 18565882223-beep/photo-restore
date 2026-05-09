@@ -22,7 +22,7 @@ export default function CodeVerify({ onVerified }: CodeVerifyProps) {
     setMessage("");
 
     try {
-      const res = await fetch("/api/verify", {
+      const res = await fetch("https://1429552633-fm2kefpz6l.ap-guangzhou.tencentscf.com/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: code.trim() }),
@@ -36,7 +36,7 @@ export default function CodeVerify({ onVerified }: CodeVerifyProps) {
         onVerified(code.trim());
       } else {
         setStatus("error");
-        setMessage("卡密无效，请检查后重试");
+        setMessage(data.error || "卡密无效，请检查后重试");
       }
     } catch {
       setStatus("error");
